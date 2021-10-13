@@ -12,24 +12,26 @@ export GOPROXY ?= https://proxy.golang.org
 export GOSUMDB ?= sum.golang.org
 
 PROJECT_ROOT := infobloxopen/dapr
-REPO         := infobloxopen
+REPO         := infoblox
 GITHUB_REPO  := git@github.com:infobloxopen
 WINDOWS_VERSION :=1809
 
 
 GIT_COMMIT  = $(shell git rev-list -1 HEAD)
-GIT_VERSION = $(shell git describe --always --abbrev=7 --dirty)
+GIT_VERSION = $(shell git describe --always --abbrev=7 )
 # By default, disable CGO_ENABLED. See the details on https://golang.org/cmd/cgo
 CGO         ?= 0
-BINARIES    ?= daprd placement operator injector
+BINARIES    ?= daprd placement operator injector sentry
+
+
 
 # Add latest tag if LATEST_RELEASE is true
 LATEST_RELEASE ?=
 
 ifdef REL_VERSION
-	DAPR_VERSION := $(REL_VERSION)
+	DAPR_VERSION = $(REL_VERSION)
 else
-	DAPR_VERSION := edge
+	DAPR_VERSION = $(GIT_COMMIT)
 endif
 
 LOCAL_ARCH := $(shell uname -m)
@@ -188,18 +190,9 @@ DAPR_RUNTIME_DOCKER_IMAGE_LATEST_TAG=$(DAPR_RUNTIME_DOCKER_IMAGE_TAG):$(LATEST_T
 DAPR_PLACEMENT_DOCKER_IMAGE_LATEST_TAG=$(DAPR_PLACEMENT_DOCKER_IMAGE_TAG):$(LATEST_TAG)
 DAPR_SENTRY_DOCKER_IMAGE_LATEST_TAG=$(DAPR_SENTRY_DOCKER_IMAGE_TAG):$(LATEST_TAG)
 endif
-check-arch-paltform:
-ifeq ($(GOARCH),arm)
-	DOCKER_IMAGE_PLATFORM:=$(TARGET_OS)/arm/v7
-else ifeq ($(GOARCH),arm64)
-	DOCKER_IMAGE_PLATFORM:=$(TARGET_OS)/arm64/v8
-else
-	#DOCKER_IMAGE_PLATFORM:=$(TARGET_OS)/amd64
-endif
-
 
 # build docker image for linux
-docker-build: check-arch-paltform
+docker-build:
 ifeq ($(GOARCH),amd64)
 	$(info Building $(DOCKER_IMAGE_TAG) docker image ...)
 	$(DOCKER) build --build-arg PKG_FILES=* -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)/. -t $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
@@ -211,7 +204,7 @@ ifeq ($(GOARCH),amd64)
 	$(DOCKER) build --build-arg PKG_FILES=sentry -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)/. -t $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
 else
 	-$(DOCKER) buildx create --use --name daprbuild
-	-$(DOCKER) run --rm --privileged multiarch/qemu-user-static --reset -p yes
+	-$(DOCKER) run --rm --privileged multiarch/qemu-user-static --reset
 	$(DOCKER) buildx build --build-arg PKG_FILES=* --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)/. -t $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
 	$(DOCKER) buildx build --build-arg PKG_FILES=daprd --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)/. -t $(DAPR_RUNTIME_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
 	$(DOCKER) buildx build --build-arg PKG_FILES=placement --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)/. -t $(DAPR_PLACEMENT_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
@@ -225,9 +218,14 @@ ifeq ($(LATEST_RELEASE),true)
 	$(DOCKER) tag $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) $(DAPR_SENTRY_DOCKER_IMAGE_LATEST_TAG)-$(GOOS)-$(GOARCH)
 endif
 
-
+check-arch-platform:
+ifeq ($(GOARCH),arm)
+	$(eval DOCKER_IMAGE_PLATFORM := $(GOOS)/arm/v7)
+else ifeq ($(GOARCH),arm64)
+	$(eval DOCKER_IMAGE_PLATFORM := $(GOOS)/arm64/v8)
+endif
 # push docker image to the registry
-docker-push: docker-build
+docker-push: check-arch-platform docker-build
 ifeq ($(GOARCH),amd64)
 	$(info Pushing $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) docker image ...)
 	$(DOCKER) push $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
@@ -239,11 +237,11 @@ ifeq ($(GOARCH),amd64)
 	$(DOCKER) push $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)
 else
 	-$(DOCKER) buildx create --use --name daprbuild
-	-$(DOCKER) run --rm --privileged multiarch/qemu-user-static --reset -p yes
-	$(DOCKER) buildx build --build-arg PKG_FILES=* --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(BIN_PATH) -t $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) --push
-	$(DOCKER) buildx build --build-arg PKG_FILES=daprd --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(BIN_PATH) -t $(DAPR_RUNTIME_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) --push
-	$(DOCKER) buildx build --build-arg PKG_FILES=placement --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(BIN_PATH) -t $(DAPR_PLACEMENT_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) --push
-	$(DOCKER) buildx build --build-arg PKG_FILES=sentry --platform $(DOCKER_IMAGE_PLATFORM) -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(BIN_PATH) -t $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH) --push
+	-$(DOCKER) run --rm --privileged multiarch/qemu-user-static --reset
+	$(DOCKER) buildx build --build-arg PKG_FILES=*  -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)  -t $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)  --push --platform $(DOCKER_IMAGE_PLATFORM)
+	$(DOCKER) buildx build --build-arg PKG_FILES=daprd  -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)  -t $(DAPR_RUNTIME_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)  --push --platform $(DOCKER_IMAGE_PLATFORM)
+	$(DOCKER) buildx build --build-arg PKG_FILES=placement  -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)  -t $(DAPR_PLACEMENT_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)  --push --platform $(DOCKER_IMAGE_PLATFORM)
+	$(DOCKER) buildx build --build-arg PKG_FILES=sentry  -f $(DOCKERFILE_DIR)/$(DOCKERFILE) $(LINUX_BINS_OUT_DIR)  -t $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)  --push --platform $(DOCKER_IMAGE_PLATFORM) 
 endif
 ifeq ($(LATEST_RELEASE),true)
 	$(info Pushing $(DOCKER_IMAGE_LATEST_TAG)-$(GOOS)-$(GOARCH) docker image ...)
@@ -307,10 +305,10 @@ tidy:
 ################################################################################
 .PHONY:clean
 clean:
-	#$(DOCKER) rmi -f $(shell docker images -q $(DOCKER_IMAGE_TAG)) || true
-	#$(DOCKER) rmi -f $(shell docker images -q $(DAPR_RUNTIME_DOCKER_IMAGE_TAG)) || true
-	#$(DOCKER) rmi -f $(shell docker images -q $(DAPR_PLACEMENT_DOCKER_IMAGE_TAG)) || true
-	#$(DOCKER) rmi -f $(shell docker images -q $(DAPR_SENTRY_DOCKER_IMAGE_TAG)) || true
+	$(DOCKER) rmi -f $(shell docker images -q $(DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH))  || true
+	$(DOCKER) rmi -f $(shell docker images -q $(DAPR_RUNTIME_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)) || true
+	$(DOCKER) rmi -f $(shell docker images -q $(DAPR_PLACEMENT_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)) || true
+	$(DOCKER) rmi -f $(shell docker images -q $(DAPR_SENTRY_DOCKER_IMAGE_TAG)-$(GOOS)-$(GOARCH)) || true
 ################################################################################
 # Target: test                                                                 #
 ################################################################################

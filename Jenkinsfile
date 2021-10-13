@@ -27,13 +27,6 @@ pipeline {
         sh "cd $DIRECTORY && make test"
       }
     }
-   stage("build-and-archive-binaries-darwin-amd64") {
-      steps {
-        sh "cd $DIRECTORY && make tidy && make release GOOS='darwin' GOARCH='amd64' "
-      }
-     	  
-	  
-    }
    stage("build-and-archive-binaries-linux-arm64"){
         steps {
           sh "cd $DIRECTORY && make tidy && make release GOOS='linux' GOARCH='arm64' "
@@ -48,7 +41,7 @@ pipeline {
     stage("Build-And-Push-Docker") {
        steps {
         withDockerRegistry([credentialsId: "dockerhub-bloxcicd", url: ""]) {
-          sh "cd $DIRECTORY && make docker-push  GOOS='darwin' GOARCH='amd64'  && make docker-push GOOS='linux' GOARCH='arm64' && make docker-push GOOS='linux' GOARCH='amd64' "
+          sh "cd $DIRECTORY && make docker-push GOOS='linux' GOARCH='arm64' && make docker-push GOOS='linux' GOARCH='amd64' "
           
         }
       }
@@ -56,11 +49,9 @@ pipeline {
   
   }
   post {
-    success {
-      finalizeBuild()
-    }
     cleanup {
-      sh "cd $DIRECTORY && make clean"
+      sh "cd $DIRECTORY && make clean GOOS='linux' GOARCH='arm64'"
+      sh "cd $DIRECTORY && make clean GOOS='linux' GOARCH='amd64'"
     }
   }
 }

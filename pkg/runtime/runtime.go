@@ -344,10 +344,10 @@ func (a *DaprRuntime) initRuntime(opts *runtimeOpts) error {
 	grpcAPI.SetDirectMessaging(a.directMessaging)
 
 	if a.hostingActors() {
-	    err = a.initActors()
-	    if err != nil {
-		log.Warnf("failed to init actors: %s", err)
-	    }
+		err = a.initActors()
+		if err != nil {
+			log.Warnf("failed to init actors: %s", err)
+		}
 	}
 
 	a.daprHTTPAPI.SetActorRuntime(a.actor)
@@ -1342,6 +1342,33 @@ func (a *DaprRuntime) extractComponentCategory(component components_v1alpha1.Com
 }
 
 func (a *DaprRuntime) processComponents() {
+	mqttFound := false
+outer:
+	for {
+		select {
+		case <-time.After(1 * time.Minute):
+			if !mqttFound {
+				log.Fatalf("mqttbus component is not loaded in 1 minute. Restarting sidecar")
+			}
+		case comp := <-a.pendingComponents:
+			if comp.Name == "" {
+				continue
+			}
+			if comp.Name == "mqttbus" {
+				log.Info("mqttbus discovered")
+				mqttFound = true
+				break outer
+			}
+			err := a.processComponentAndDependents(comp)
+			if err != nil {
+				e := fmt.Sprintf("process component %s error: %s", comp.Name, err.Error())
+				if !comp.Spec.IgnoreErrors {
+					log.Fatalf(e)
+				}
+				log.Errorf(e)
+			}
+		}
+	}
 	for comp := range a.pendingComponents {
 		if comp.Name == "" {
 			continue
